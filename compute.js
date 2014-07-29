@@ -1,12 +1,18 @@
-//     ComputeJS 0.0.1
+//======================================
+//! ComputeJS 0.1.0
+//! (c) 2013 Phong Vu, Jam.vn.
+//!
+//! ComputeJS may be freely distributed 
+//!	under the MIT license.
+//!
+//! For all details and documentation:
+//!	https://github.com/iphong/computejs
+//======================================
 
-//     (c) 2013 Phong Vu, Jam.vn.
-//     ComputeJS may be freely distributed under the MIT license.
-//     For all details and documentation:
-//     https://github.com/iphong/computejs
+
 
 void function( root ) {
-  
+	
 	var window = root.window;
 	var document = root.document;
 	
@@ -245,7 +251,7 @@ void function( root ) {
 		}
 	};
 	
-	
+	a = /hel[l;]/
 	
 	// Export module for CommonJS and the Browser
 	// ------------------------------------------
@@ -267,9 +273,13 @@ void function( root ) {
 		return window !== undefined && document !== undefined;
 	};
 	
-	
-	Compute.MAX_ERRORS = 10;
+	Compute.MAX_ERRORS = 0;
 	Compute.ERRORS_CAUGHT = 0;
+	
+	Compute.exec = function() {
+		var node = new Node;
+		return node.execute.apply(node, arguments);
+	};
 	
 	
 	// Compute EventEmitter
@@ -434,6 +444,14 @@ void function( root ) {
 	
 	extend(Task.prototype, {
 		
+		start: function( callback, context ) {
+			this.on('start', callback, context);
+			return this;
+		},
+		progress: function( callback, context ) {
+			this.on('progress', callback, context);
+			return this;
+		},
 		done: function( callback, context ) {
 			this.on('complete', callback, context);
 			return this;
@@ -457,9 +475,6 @@ void function( root ) {
 		
 		if (!(this instanceof Compute_Node))
 			return new Compute_Node(filename, options);
-			
-		if (!filename)
-			throw "Missing argument[0]: path to compute module is required.";
 		
 		var node = this;
 		var worker = null;
@@ -476,13 +491,13 @@ void function( root ) {
 		
 			if (!worker) {
 				worker = new Worker(Compute.script);
-				worker.postMessage(['node:init', path.resolve(path.dirname(Compute.script), filename),options]);
 				worker.addEventListener('message', function(event) {
 					
 					var args = slice.call(event.data);
 					var type = args.shift();
 					
 					switch (type) {
+						
 						case 'node:event':
 							return node.trigger.apply(node, args);
 						case 'node:debug':
@@ -491,31 +506,48 @@ void function( root ) {
 							return console.warn.apply(console, unshift(args, 'node('+node.id+')'));
 						case 'node:log':
 							return console.log.apply(console, unshift(args, 'node('+node.id+')'));
-						case 'compute:value':
+						
+						
+						case 'node:progress':
+							if (!node.active) return;
+							invokeEvent([node.active], 'progress', args);
+							invokeEvent([node], type, unshift(args, node));
+							return;
+						
+						case 'invoke:value':
+						case 'execute:value':
 							if (!node.active) return;
 							invokeEvent([node.active], 'complete', args);
-							invokeEvent([node], 'compute:value', unshift(args, node));
+							invokeEvent([node], type, unshift(args, node));
 							node.active = null;
-							node.next()
+							node.next();
 							return;
 					}
 				});
 				worker.addEventListener('error', function(event) {
+				
+					event.preventDefault();
+					
 					node.trigger('error', {
 						lineno: event.lineno,
 						filename: filename,
 						message: event.message,
 						task: node.active
 					});
-					!node.active || node.push(node.active);
+//					!node.active || node.push(node.active);
 					node.active = null;
-					node.worker = null;
-					
-					if (++Compute.ERRORS_CAUGHT < Compute.MAX_ERRORS)
-						node.next();
-					else
-						throw "THE NUMBER OF ERRORS ALLOWED HAS MAXED OUT.";
+					node.kill();
+					node.next();
+//					if (++Compute.ERRORS_CAUGHT < Compute.MAX_ERRORS || Compute.MAX_ERRORS == 0) {
+//						node.next();
+//					}
+//					else
+//						throw "THE NUMBER OF ERRORS ALLOWED HAS MAXED OUT.";
+//					
+					return false;
 				});
+				
+				!filename || worker.postMessage(['node:init', filename, options]);
 			}
 			return worker;
 		});
@@ -534,11 +566,13 @@ void function( root ) {
 		},
 		
 		next: function() {
-			if (!this.active) {
-				if (this.tasks.length) {
-					this.active = array.shift.call(this.tasks);
-					this.worker.postMessage(slice.call(this.active));
-				}
+			if (!this.active && this.tasks.length) {
+				this.active = array.shift.call(this.tasks);
+				this.active.trigger("start");
+				this.worker.postMessage(slice.call(this.active));
+			}
+			else if (!this.tasks.length) {
+				this.kill();
 			}
 			return this;
 		},
@@ -552,13 +586,19 @@ void function( root ) {
 		bind: function( ns ) {
 			var self = this;
 			return setValue(this, ns, function() {
-				return self.compute.apply(self, unshift(arguments, ns));
+				return self.invoke.apply(self, unshift(arguments, ns));
 			});
 		},
 		
-		compute: function() {
-			var task = new Task('node:compute', arguments);
-			this.push(task);
+		invoke: function() {
+			var task = new Task('node:invoke', arguments);
+			defer(this.push, this, task);
+			return task;
+		},
+		
+		execute: function( ctx ) {
+			var task = new Task('node:execute', unshift(slice.call(arguments,1), ctx.toString()));
+			defer(this.push, this, task);
 			return task;
 		}
 	});
@@ -571,9 +611,6 @@ void function( root ) {
 	
 		if (!(this instanceof Compute_Cluster))
 			return new Compute_Cluster(filename, num, options);
-			
-		if (!filename)
-			throw "Missing argument[0]: path to compute module is required.";
 		
 		if (typeof num == 'object')
 			var options = num, num = 1;
@@ -699,9 +736,18 @@ void function( root ) {
 			root.require = function( filename ) {
 				return Module(filename, node, node.scope);
 			};
+			
 			root.emit = function() {
 				postMessage(unshift(arguments, 'node:event'));
 			};
+			root.progress = function() {
+				postMessage(unshift(arguments, 'node:progress'));
+			};
+			root.complete = function() {
+				invokeEvent([node], 'invoke:value', arguments);
+			};
+			
+			
 			root.log = node.log = function() {
 				postMessage(unshift(arguments, 'node:log'));
 			};
@@ -711,6 +757,8 @@ void function( root ) {
 			root.warn = node.warn = function() {
 				postMessage(unshift(arguments, 'node:warn'));
 			};
+			
+			
 			root.addEventListener('message', function(event) {
 				
 				var args = slice.call(event.data);
@@ -718,27 +766,38 @@ void function( root ) {
 				
 				switch (type) {
 					case 'node:init': 
-						var filepath = path.resolve(path.dirname(node.filename), args.shift());
+						var filename = args.shift();
 						var options = args.shift();
 						
 						node.scope = options.scope || {};
-						node.exports = require(filepath);
+						node.exports = require(path.resolve(path.dirname(node.filename), filename));
 					break;
 					case 'node:event':
 						node.trigger.apply(node, args);
 					break;
-					case 'node:compute':
+					case 'node:invoke':
 						var func = getValue(node.exports, args.shift());
 							
-						node.once('compute:value', function() {
-							postMessage(unshift(arguments, 'compute:value'));
+						node.once('invoke:value', function() {
+							postMessage(unshift(arguments, 'invoke:value'));
 						});
-						args.push(node.trigger.bind(node, 'compute:value'));
+						args.push(node.trigger.bind(node, 'invoke:value'));
 						if (typeof func === 'function') {
 							var result = func.apply(node, args);
 							if (result !== undefined)
-								node.trigger('compute:value', result);
+								node.trigger('invoke:value', result);
 						}
+					break;
+					case 'node:execute':
+						eval('var func = '+args.shift());
+							
+						node.once('execute:value', function() {
+							postMessage(unshift(arguments, 'execute:value'));
+						});
+						args.push(node.trigger.bind(node, 'execute:value'));
+						var result = func.apply(node, args);
+						if (result !== undefined)
+							node.trigger('execute:value', result);
 					break;
 				}
 			}, true);
