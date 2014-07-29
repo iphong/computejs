@@ -1,7 +1,7 @@
 computejs
 =========
 
-Spread your HTML5 app computation across multiple CPU cores using web workers.
+Advanced javascript compute engine for most modern browsers.
 
 
 ## How to use?
