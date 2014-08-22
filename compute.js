@@ -251,8 +251,6 @@ void function( root ) {
 		}
 	};
 	
-	a = /hel[l;]/
-	
 	// Export module for CommonJS and the Browser
 	// ------------------------------------------
 	var Compute = typeof exports !== 'undefined' ?
@@ -260,7 +258,7 @@ void function( root ) {
 		exports : root.Compute = new (function Compute() { this.__proto__ = null });
 	
 	// Current version of Compute.JS
-	Compute.version = '0.0.1';
+	Compute.version = '0.1.0';
 	
 	// Run Compute in no-conflict mode
 	Compute.noConflict = function() {
@@ -435,6 +433,8 @@ void function( root ) {
 		this.__proto__ = null;
 	};
 	
+	// Compute Tasks
+	// --------------------
 	var Task = Compute.Task = inherits( EventEmitter, function Compute_Task( type, args ) {
 		array.push.call(this,type)
 		each(args, function( arg, i ) {
@@ -446,10 +446,6 @@ void function( root ) {
 		
 		start: function( callback, context ) {
 			this.on('start', callback, context);
-			return this;
-		},
-		progress: function( callback, context ) {
-			this.on('progress', callback, context);
 			return this;
 		},
 		done: function( callback, context ) {
@@ -499,6 +495,9 @@ void function( root ) {
 					switch (type) {
 						
 						case 'node:event':
+							// Trigger event for task associated with this node
+							!node.active || node.active.trigger.apply(node.active, args);
+							// trigger event for this node
 							return node.trigger.apply(node, args);
 						case 'node:debug':
 							return console.debug.apply(console, unshift(args, 'node('+node.id+')'));
@@ -506,13 +505,6 @@ void function( root ) {
 							return console.warn.apply(console, unshift(args, 'node('+node.id+')'));
 						case 'node:log':
 							return console.log.apply(console, unshift(args, 'node('+node.id+')'));
-						
-						
-						case 'node:progress':
-							if (!node.active) return;
-							invokeEvent([node.active], 'progress', args);
-							invokeEvent([node], type, unshift(args, node));
-							return;
 						
 						case 'invoke:value':
 						case 'execute:value':
@@ -731,20 +723,14 @@ void function( root ) {
 		break;
 		case false:
 			
-			root.node = new Context(location.pathname);
+			var node = root.node = new Context(location.pathname);
 			
-			root.require = function( filename ) {
+			root.require = node.require = function( filename ) {
 				return Module(filename, node, node.scope);
 			};
 			
-			root.emit = function() {
+			root.emit = node.emit = function() {
 				postMessage(unshift(arguments, 'node:event'));
-			};
-			root.progress = function() {
-				postMessage(unshift(arguments, 'node:progress'));
-			};
-			root.complete = function() {
-				invokeEvent([node], 'invoke:value', arguments);
 			};
 			
 			
